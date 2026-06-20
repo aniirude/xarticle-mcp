@@ -1,20 +1,52 @@
 import fs from "node:fs";
-import { chromium } from "playwright";
-import { CONFIG_DIR, STATE_PATH } from "./paths.js";
-import { encrypt, decrypt } from "./crypto.js";
+import { chromium, type BrowserContext } from "playwright";
+import { CONFIG_DIR, PROFILE_DIR } from "./paths.js";
+
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+// Flags that suppress the "automated test software" infobar and the navigator.webdriver signal.
+const STEALTH_ARGS = [
+  "--disable-blink-features=AutomationControlled",
+  "--no-default-browser-check",
+];
 
 export function hasSession(): boolean {
-  return fs.existsSync(STATE_PATH);
+  try {
+    return fs.existsSync(PROFILE_DIR) && fs.readdirSync(PROFILE_DIR).length > 0;
+  } catch {
+    return false;
+  }
 }
 
-/** Decrypt the saved Playwright storageState (the logged-in X session). */
-export function loadStorageState(): Record<string, unknown> {
-  if (!fs.existsSync(STATE_PATH)) {
-    throw new Error(
-      "No saved X session. Run this once in a terminal:\n  npx -y xarticle-mcp login"
-    );
+/**
+ * Launch a persistent browser context backed by ~/.xarticle/chrome-profile.
+ * Prefers the real installed Chrome (channel: "chrome") — far less likely to be
+ * flagged by X/Google than Playwright's bundled Chromium — and falls back to
+ * bundled Chromium if Chrome isn't installed.
+ */
+export async function openContext(
+  headless: boolean,
+  viewport: { width: number; height: number } | null = null
+): Promise<BrowserContext> {
+  fs.mkdirSync(PROFILE_DIR, { recursive: true });
+  const opts = {
+    headless,
+    viewport,
+    userAgent: UA,
+    locale: "en-US",
+    args: STEALTH_ARGS,
+  } as const;
+  let ctx: BrowserContext;
+  try {
+    ctx = await chromium.launchPersistentContext(PROFILE_DIR, { ...opts, channel: "chrome" });
+  } catch {
+    ctx = await chromium.launchPersistentContext(PROFILE_DIR, opts);
   }
-  return JSON.parse(decrypt(fs.readFileSync(STATE_PATH)));
+  await ctx.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+  return ctx;
 }
 
 function waitForEnter(prompt: string): Promise<void> {
@@ -31,24 +63,31 @@ function waitForEnter(prompt: string): Promise<void> {
 }
 
 /**
- * Interactive, one-time login. Opens a real browser, lets the user sign into X,
- * then captures + encrypts the session. Run from a terminal (not via the MCP client).
+ * One-time interactive login. Opens real Chrome to x.com; the user signs in
+ * (use username + password — Google/Apple SSO is blocked inside controlled
+ * browsers). The session persists in the profile dir for headless fetches.
+ * Run this from a terminal, not via the MCP client.
  */
 export async function login(): Promise<void> {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  console.error("Opening a browser. Log into X (x.com), then come back here.");
-  const browser = await chromium.launch({ headless: false });
+  console.error(
+    [
+      "Opening Chrome to x.com.",
+      "Tip: sign in with your USERNAME + PASSWORD, not 'Continue with Google/Apple'",
+      "(SSO popups are blocked inside automated browsers).",
+      "If X says 'login temporarily limited', wait ~15-30 min and run login again.",
+      "",
+    ].join("\n")
+  );
+  const ctx = await openContext(false);
   try {
-    const context = await browser.newContext();
-    const page = await context.newPage();
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
     await page.goto("https://x.com/login", { waitUntil: "domcontentloaded" });
     await waitForEnter(
-      "\nWhen you're fully logged in (you can see your home timeline), press ENTER here to save the session...\n"
+      "When you can see your home timeline (logged in), press ENTER here to save the session...\n"
     );
-    const state = await context.storageState();
-    fs.writeFileSync(STATE_PATH, encrypt(JSON.stringify(state)), { mode: 0o600 });
-    console.error(`\nSaved encrypted X session to ${STATE_PATH}`);
+    console.error(`\nSession saved to profile: ${PROFILE_DIR}`);
   } finally {
-    await browser.close();
+    await ctx.close();
   }
 }

@@ -1,5 +1,4 @@
-import { chromium } from "playwright";
-import { loadStorageState } from "./auth.js";
+import { openContext } from "./auth.js";
 
 export interface ArticleMeta {
   title: string;
@@ -15,24 +14,15 @@ export interface FetchResult {
   sourceUrl: string;
 }
 
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
 /**
  * Load an X Article with the saved session and return the densest content block's
  * HTML plus best-effort metadata. All X-DOM specifics are isolated here — if X
  * changes its markup, this is the only file to adjust.
  */
 export async function fetchArticle(sourceUrl: string): Promise<FetchResult> {
-  const storageState = loadStorageState() as never;
-  const browser = await chromium.launch({ headless: true });
+  const context = await openContext(true, { width: 1280, height: 2200 });
   try {
-    const context = await browser.newContext({
-      storageState,
-      userAgent: UA,
-      viewport: { width: 1280, height: 2200 },
-    });
-    const page = await context.newPage();
+    const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
 
@@ -114,6 +104,6 @@ export async function fetchArticle(sourceUrl: string): Promise<FetchResult> {
 
     return { meta, html, sourceUrl };
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
