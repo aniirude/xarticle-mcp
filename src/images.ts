@@ -63,6 +63,8 @@ async function fetchBuffer(url: string): Promise<{ buf: Buffer; contentType: str
 async function maybePng(buf: Buffer, ext: string, format: ImageFormat): Promise<{ buf: Buffer; ext: string }> {
   if (format !== "png" || ext === "png") return { buf, ext };
   try {
+    // sharp is an optional add-on (`npm i sharp`); not a declared dependency.
+    // @ts-expect-error optional, possibly-absent module
     const sharp = (await import("sharp")).default;
     return { buf: await sharp(buf).png().toBuffer(), ext: "png" };
   } catch {

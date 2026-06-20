@@ -2,7 +2,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
-import { chromium, type BrowserContext } from "playwright";
+import { chromium, type Browser, type BrowserContext } from "playwright-core";
+
+/** Drive the user's installed Chrome (or Edge); no bundled browser is downloaded. */
+async function launchChromium(headless: boolean): Promise<Browser> {
+  for (const channel of ["chrome", "msedge"] as const) {
+    try {
+      return await chromium.launch({ headless, channel });
+    } catch {
+      /* try the next installed browser */
+    }
+  }
+  throw new Error(
+    "No Chrome or Edge found. Install Google Chrome (or Microsoft Edge) and retry."
+  );
+}
 import { CONFIG_DIR, KEY_PATH, STATE_PATH } from "./paths.js";
 import { encrypt, decrypt } from "./crypto.js";
 
@@ -61,12 +75,7 @@ export async function openFetchContext(
   viewport: { width: number; height: number } = { width: 1280, height: 900 }
 ): Promise<BrowserContext> {
   const storageState = loadStorageState() as never;
-  let browser;
-  try {
-    browser = await chromium.launch({ headless: true, channel: "chrome" });
-  } catch {
-    browser = await chromium.launch({ headless: true });
-  }
+  const browser = await launchChromium(true);
   return browser.newContext({ storageState, viewport, locale: "en-US" });
 }
 
@@ -90,7 +99,7 @@ function ask(question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, (a) => { rl.close(); resolve(a.trim()); }));
 }
 
-async function isLoggedIn(page: import("playwright").Page): Promise<boolean> {
+async function isLoggedIn(page: import("playwright-core").Page): Promise<boolean> {
   if (/\/(login|i\/flow\/login)/.test(page.url())) return false;
   const el = page
     .locator('[data-testid="AppTabBar_Home_Link"], [aria-label="Home timeline"], [data-testid="SideNav_AccountSwitcher_Button"]')
