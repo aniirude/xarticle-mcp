@@ -79,23 +79,23 @@ export function htmlToMarkdown(html: string, baseUrl: string): MarkdownResult {
         source?.getAttribute("data-src") ||
         "";
       const poster = el.getAttribute("poster") || "";
+      const isDownloadable = /^https?:/i.test(raw) && !raw.startsWith("blob:") && !raw.startsWith("data:");
 
-      // X often renders blob-backed videos. Those cannot be downloaded after the
-      // page closes, so preserve the poster image if one exists.
-      if (!raw || raw.startsWith("blob:") || raw.startsWith("data:")) {
-        if (poster && !poster.startsWith("blob:") && !poster.startsWith("data:")) {
-          const src = absolutize(poster, baseUrl);
-          const placeholder = `__XIMG_${images.length}__`;
-          images.push({ src, placeholder });
-          return `\n\n![Video poster](${placeholder})\n\n`;
-        }
-        return "\n\n_[Video unavailable in archive]_\n\n";
+      // Got a real MP4 (attached from GraphQL variants): archive + Obsidian embed.
+      if (isDownloadable) {
+        const placeholder = `__XMEDIA_${media.length}__`;
+        media.push({ src: absolutize(raw, baseUrl), placeholder });
+        return `\n\n${placeholder}\n\n`;
       }
 
-      const src = absolutize(raw, baseUrl);
-      const placeholder = `__XMEDIA_${media.length}__`;
-      media.push({ src, placeholder });
-      return `\n\n<video controls src="${placeholder}"></video>\n\n[Open video](${placeholder})\n\n`;
+      // No downloadable file (HLS/blob only): keep the poster + a link to X.
+      // Never emit an empty <video> player.
+      if (poster && /^https?:/i.test(poster) && !poster.startsWith("blob:")) {
+        const placeholder = `__XIMG_${images.length}__`;
+        images.push({ src: absolutize(poster, baseUrl), placeholder });
+        return `\n\n![Video poster](${placeholder})\n\n[▶ Watch video on X](${baseUrl})\n\n`;
+      }
+      return `\n\n[▶ Watch video on X](${baseUrl})\n\n`;
     },
   });
 

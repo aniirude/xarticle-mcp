@@ -115,11 +115,15 @@ export async function saveArticle(opts: SaveOptions): Promise<SaveResult> {
   const { map: mediaMap, saved: mediaSaved } = await downloadMedia(
     bodyMedia,
     path.join(dir, "media"),
-    "media"
+    slug
   );
 
   for (const [ph, rel] of map) body = body.split(ph).join(rel);
-  for (const [ph, rel] of mediaMap) body = body.split(ph).join(rel);
+  for (const [ph, val] of mediaMap) {
+    // Downloaded file -> Obsidian embed; failed download -> link to X.
+    const embed = /^https?:/i.test(val) ? `[▶ Watch video on X](${val})` : `![[${val}]]`;
+    body = body.split(ph).join(embed);
+  }
 
   const frontmatter = yaml({
     title: meta.title,

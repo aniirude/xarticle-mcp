@@ -115,7 +115,7 @@ export async function downloadImages(
 export async function downloadMedia(
   media: MediaRef[],
   destDir: string,
-  relPrefix: string
+  namePrefix: string
 ): Promise<DownloadResult> {
   const map = new Map<string, string>();
   if (media.length === 0) return { map, saved: 0 };
@@ -128,13 +128,14 @@ export async function downloadMedia(
     try {
       const { buf, contentType } = await fetchBuffer(item.src);
       const ext = extFromMediaUrl(item.src, contentType);
-      const name = `${String(i).padStart(2, "0")}.${ext}`;
+      // Unique, vault-resolvable basename so Obsidian `![[name]]` embeds work.
+      const name = `${namePrefix}-${String(i).padStart(2, "0")}.${ext}`;
       await fs.writeFile(path.join(destDir, name), buf);
-      map.set(item.placeholder, `${relPrefix}/${name}`);
+      map.set(item.placeholder, name); // basename for the wikilink embed
       saved++;
     } catch (e) {
       console.error(`[xarticle-mcp] media ${i} failed (${item.src}): ${(e as Error).message}`);
-      map.set(item.placeholder, item.src);
+      map.set(item.placeholder, item.src); // remote URL -> rendered as a link
     }
   }
   return { map, saved };

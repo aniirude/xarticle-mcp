@@ -87,6 +87,18 @@ async function main(): Promise<void> {
     }
     process.exit(0);
   }
+  if (process.argv[2] === "save" || process.argv[2] === "fetch") {
+    const url = process.argv[3];
+    if (!url) {
+      console.error("Usage: xarticle-mcp save <url> [outputDir]");
+      process.exit(1);
+    }
+    const r = await saveArticle({ url, outputDir: process.argv[4] });
+    console.error(
+      `Saved "${r.title}" -> ${r.dir}\n  images: ${r.imageCount}\n  media: ${r.mediaCount}`
+    );
+    process.exit(0);
+  }
   await runServer();
 }
 
