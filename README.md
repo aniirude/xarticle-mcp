@@ -1,16 +1,20 @@
 # xarticle-mcp
 
-An MCP server that saves an **X (Twitter) Article** to your disk as **Obsidian-faithful Markdown** with all images downloaded locally — so the article reads in Obsidian the way it reads on X.
+Save an **X (Twitter) Article** to disk as **Obsidian-faithful Markdown** — with images and videos downloaded locally — so it reads in Obsidian the way it reads on X.
 
-One tool: **`xarticle <url>`** -> creates `<slug>/<slug>.md` + `images/` + `media/` in your working directory, with YAML frontmatter and rewritten local asset links.
+One tool: **`xarticle <url>`** → creates `<slug>/<slug>.md` + `images/` (+ `media/` for video) in your working directory, with YAML frontmatter and local, rewritten links.
 
-> Works in any MCP client (Claude Code, Codex, Cursor, Windsurf, …). Fetches via an authenticated headless browser using **your own** X session, stored encrypted on your machine.
+Works in any MCP client: **Claude Code, Codex, Cursor, Windsurf**, … It fetches with **your own** X session, stored encrypted on your machine.
 
 ---
 
-## Install (1 line)
+## Requirements
 
-Add to your MCP client config:
+- **Node.js ≥ 18** (the only prerequisite). Chromium is installed automatically on first install.
+
+## Install (one line)
+
+Add this to your MCP client config:
 
 ```json
 {
@@ -20,83 +24,80 @@ Add to your MCP client config:
 }
 ```
 
-- **Claude Code:** put it in `.mcp.json` (project) or your user MCP config.
-- **Codex / Cursor / Windsurf / others:** same `command` + `args` in their MCP config.
+- **Claude Code** — `.mcp.json` in your project root (or your user MCP config).
+- **Codex** — add an MCP server entry with the same `command` + `args`.
+- **Cursor / Windsurf / others** — same `command` + `args` in their MCP settings.
 
-> Not published to npm yet? You can run straight from GitHub with the same config but `args: ["-y", "github:aniirude/xarticle-mcp"]`.
+> Prefer running straight from source? Use `"args": ["-y", "github:aniirude/xarticle-mcp"]`.
 
-On install it runs `playwright install chromium`. If that's skipped, run it once:
+First install runs `playwright install chromium` automatically. If it's skipped, run `npx playwright install chromium` once.
 
-```bash
-npx playwright install chromium
-```
+## One-time login (paste 2 cookies)
 
-## One-time login
-
-X Articles require a logged-in session. Run this once in a terminal — a browser opens, you log into X, then press Enter:
+X Articles need your logged-in session. There's no automated login (X rate-limits those), so you paste two session cookies once — they're stored **encrypted** at `~/.xarticle/`.
 
 ```bash
 npx -y xarticle-mcp login
 ```
 
-Your session is encrypted (AES-256-GCM) at `~/.xarticle/storageState.enc` with a key in `~/.xarticle/key`. It never leaves your machine and is never committed.
+It walks you through it:
+1. In a browser logged into X, press **F12**.
+2. **Application** tab (Chrome/Edge) or **Storage** (Firefox) → **Cookies** → `https://x.com`.
+3. Copy the value of **`auth_token`**, paste, Enter.
+4. Copy the value of **`ct0`**, paste, Enter.
 
-### Local development commands
+Check it anytime with `npx -y xarticle-mcp status`.
 
-Before this package is published to npm, run the local built server directly from this project folder:
-
-```bash
-node dist/server.js login
-node dist/server.js status
-```
-
-If Chrome profile capture fails because Chrome is still locked or you use a non-default browser/profile, use the cookie method:
-
-```bash
-node dist/server.js login --cookies
-node dist/server.js status
-```
-
-The cookie method asks for the `auth_token` and `ct0` values from a browser where you are already logged into X. It saves them into the same encrypted Playwright session file.
+*Alternative (no DevTools):* `npx -y xarticle-mcp login --browser` reuses your real Chrome profile — but you must fully quit Chrome first (it can be flaky on Windows).
 
 ## Use
 
-In your MCP client, just ask:
+In your MCP client, ask:
 
 ```
-xarticle https://x.com/i/article/...
+xarticle https://x.com/<user>/status/<id>
 ```
 
 It writes, in your current working directory:
 
 ```
 <article-slug>/
-  <article-slug>.md     # frontmatter + body, local image links
-  images/               # 01.jpg, 02.jpg, ... (+ cover)
-  media/                # 01.mp4, 02.webm, ... when article videos/GIF-video are downloadable
+  <article-slug>.md     # frontmatter + body, local links
+  images/               # 01.jpg, 02.jpg, …  (+ cover)
+  media/                # <slug>-01.mp4, …   (videos, when downloadable)
 ```
+
+- Saves to the directory your MCP client is running in. Pass `outputDir` to override.
+- Videos with a direct MP4 are embedded as `![[…mp4]]` (Obsidian renders a player). Stream-only (HLS) videos fall back to a poster image + a link to X.
 
 ### Tool input
 
 | field | type | default | notes |
 |-------|------|---------|-------|
-| `url` | string | — | the X Article URL |
+| `url` | string | — | the X Article/post URL |
 | `outputDir` | string | working dir | where to create the folder |
 | `imageFormat` | `"original"` \| `"png"` | `original` | `png` re-encodes (needs `sharp`) |
 
-## Caveats
+### CLI (handy for testing)
 
-- **Your account / X ToS:** this automates access with your logged-in session. Keep it personal and low-volume; automated access carries some account risk.
-- **Only what you can see:** articles your account can't view won't fetch.
-- **X markup changes:** extraction selectors live in `src/fetchArticle.ts`; if X changes its DOM, that's the file to update.
-- **Videos/GIFs:** direct video URLs are saved under `media/` and embedded with `<video controls>`. For blob-backed X videos, the tool tries to capture the underlying `video.twimg.com` response while the page loads; if that is not available, it keeps a poster image or fallback note instead of failing the whole article.
+```bash
+npx -y xarticle-mcp save <url> [outputDir]   # fetch without an MCP client
+npx -y xarticle-mcp status                    # check the saved session
+```
+
+## Notes & caveats
+
+- **Personal use.** This automates access with your own session; keep it low-volume. Respect X's Terms.
+- **Only what you can see.** Articles your account can't view won't fetch.
+- **Obsidian video** embeds (`![[…mp4]]`) render inside an Obsidian vault.
+- **X changes its markup.** All X-DOM selectors live in `src/fetchArticle.ts` — the one file to update if extraction drifts.
 
 ## Develop
 
 ```bash
 npm install
 npm run build
-npm run smoke      # offline: markdown conversion + tools/list
+npm run smoke   # offline: markdown/video conversion + tools/list
 ```
 
 MIT © aniirude
