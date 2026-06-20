@@ -9,3 +9,5 @@ storageState*
 .xarticle/
 .env
 *.key
+
+*.tgz
