@@ -80,10 +80,12 @@ async function main(): Promise<void> {
     process.exit(status.ok ? 0 : 1);
   }
   if (process.argv[2] === "login") {
-    if (process.argv[3] === "--cookies") {
-      await loginWithCookiesPrompt();
-    } else {
+    // Default = cookie paste (reliable on every OS/account). `--browser` reuses
+    // your real Chrome profile (no DevTools, but needs Chrome fully quit).
+    if (process.argv[3] === "--browser") {
       await login();
+    } else {
+      await loginWithCookiesPrompt();
     }
     process.exit(0);
   }

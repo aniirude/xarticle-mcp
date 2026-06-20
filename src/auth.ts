@@ -172,16 +172,23 @@ function makeCookie(name: string, value: string, httpOnly: boolean) {
 export async function loginWithCookiesPrompt(): Promise<void> {
   console.error(
     [
-      "Cookie login. In a browser logged into X:",
-      "  F12 -> Application -> Cookies -> https://x.com",
-      "  copy the VALUES of `auth_token` and `ct0`.",
+      "One-time setup: paste your X session cookies (stored encrypted on this machine).",
+      "",
+      "In a browser where you're logged into X (x.com):",
+      "  1. Press F12 to open DevTools",
+      "  2. Open the 'Application' tab (Chrome/Edge) or 'Storage' (Firefox)",
+      "  3. Left sidebar: Cookies -> https://x.com",
+      "  4. Copy the Value of `auth_token`, paste below, press Enter",
+      "  5. Copy the Value of `ct0`, paste below, press Enter",
+      "",
+      "(Both are just session tokens; nothing else is read. This lasts months.)",
       "",
     ].join("\n")
   );
-  const authToken = await ask("auth_token: ");
-  const ct0 = await ask("ct0: ");
+  const authToken = (await ask("auth_token: ")).replace(/^auth_token[=:]\s*/i, "").trim();
+  const ct0 = (await ask("ct0: ")).replace(/^ct0[=:]\s*/i, "").trim();
   if (!authToken || !ct0) {
-    console.error("Both auth_token and ct0 are required.");
+    console.error("Both auth_token and ct0 are required. Re-run and paste both values.");
     return;
   }
   const state = {
