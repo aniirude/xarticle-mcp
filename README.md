@@ -10,7 +10,8 @@ Works in any MCP client: **Claude Code, Codex, Cursor, Windsurf**, … It fetche
 
 ## Requirements
 
-- **Node.js ≥ 18** (the only prerequisite). Chromium is installed automatically on first install.
+- **Node.js ≥ 18**
+- **Google Chrome or Microsoft Edge** installed (Edge ships with Windows). The tool drives your existing browser — no separate browser download.
 
 ## Install (one line)
 
@@ -30,7 +31,7 @@ Add this to your MCP client config:
 
 > Prefer running straight from source? Use `"args": ["-y", "github:aniirude/xarticle-mcp"]`.
 
-First install runs `playwright install chromium` automatically. If it's skipped, run `npx playwright install chromium` once.
+> macOS/Linux use the same config. The tool uses your installed Chrome/Edge; nothing else to install.
 
 ## One-time login (paste 2 cookies)
 
