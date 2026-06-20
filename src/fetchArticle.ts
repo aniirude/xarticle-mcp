@@ -20,66 +20,63 @@ export interface FetchResult {
  * changes its markup, this is the only file to adjust.
  */
 export async function fetchArticle(sourceUrl: string): Promise<FetchResult> {
-  const context = await openFetchContext({ width: 1280, height: 900 });
+  const context = await openFetchContext({ width: 1280, height: 1400 });
   try {
     const page = await context.newPage();
+    const capturedVideoUrls = new Set<string>();
+    page.on("response", (response) => {
+      const url = response.url();
+      if (/^https:\/\/video\.twimg\.com\/.+\.(mp4|webm|m3u8|gif)(\?|$)/i.test(url)) {
+        capturedVideoUrls.add(url);
+      }
+    });
+
     await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
 
-    // Expand any "Show more" truncation.
-    for (const label of ["Show more", "Read more"]) {
-      const btn = page.getByRole("button", { name: label }).first();
-      if (await btn.count().catch(() => 0)) {
-        await btn.click({ timeout: 2000 }).catch(() => {});
-      }
-    }
+    // X may finish enough network activity before the longform DOM is mounted.
+    // Give client-side rendering a short settle window, then validate below.
+    await page.waitForSelector('article[role="article"], [data-testid="longform"]', {
+      timeout: 30000,
+    });
+    await page.waitForTimeout(3000);
 
-    // Wait until meaningful content is present (or time out gracefully).
+    // If X uses blob-backed video elements, attach captured direct media URLs so
+    // the Markdown converter can archive them after the page closes.
     await page
-      .waitForFunction(() => (document.body?.innerText?.length ?? 0) > 400, null, {
-        timeout: 30000,
-      })
+      .evaluate((urls) => {
+        const queue = [...urls];
+        for (const video of Array.from(document.querySelectorAll("video"))) {
+          const source = video.querySelector("source");
+          const raw =
+            video.getAttribute("src") ||
+            video.getAttribute("data-src") ||
+            source?.getAttribute("src") ||
+            source?.getAttribute("data-src") ||
+            "";
+          if ((!raw || raw.startsWith("blob:")) && queue.length > 0) {
+            video.setAttribute("data-src", queue.shift() as string);
+          }
+        }
+      }, Array.from(capturedVideoUrls))
       .catch(() => {});
 
-    const meta = await page.evaluate(() => {
+    const { meta, html } = await page.evaluate(() => {
       const prop = (p: string) =>
         document.querySelector(`meta[property="${p}"]`)?.getAttribute("content") ||
         undefined;
       const name = (n: string) =>
         document.querySelector(`meta[name="${n}"]`)?.getAttribute("content") || undefined;
-      const title = (prop("og:title") || document.title || "X Article").replace(
-        /\s+\/\s+X$/,
-        ""
-      );
-      const cover = prop("og:image");
-      // Best-effort author/handle from a profile link in the byline.
-      let author: string | undefined;
-      let handle: string | undefined;
-      const userLink = document.querySelector(
-        'a[role="link"][href^="/"] [dir] span, [data-testid="User-Name"] a'
-      );
-      if (userLink && userLink.textContent) author = userLink.textContent.trim();
-      const handleEl = Array.from(document.querySelectorAll("span")).find((s) =>
-        /^@\w{1,15}$/.test(s.textContent?.trim() || "")
-      );
-      if (handleEl) handle = handleEl.textContent?.trim();
-      const published =
-        document.querySelector("time")?.getAttribute("datetime") ||
-        name("article:published_time") ||
-        undefined;
-      return { title, cover, author, handle, published };
-    });
 
-    // Pick the richest content node among likely article containers.
-    const html = await page.evaluate(() => {
+      // Pick the richest content node among likely article containers.
       const selectors = [
         '[data-testid="longform"]',
         'article[role="article"]',
+        'article[data-testid="tweet"]',
         "article",
         '[role="article"]',
-        "main",
       ];
-      let bestHtml = "";
+      let bestEl: HTMLElement | null = null;
       let bestLen = 0;
       const seen = new Set<Element>();
       for (const sel of selectors) {
@@ -89,11 +86,54 @@ export async function fetchArticle(sourceUrl: string): Promise<FetchResult> {
           const len = (el as HTMLElement).innerText?.length ?? 0;
           if (len > bestLen) {
             bestLen = len;
-            bestHtml = (el as HTMLElement).innerHTML;
+            bestEl = el as HTMLElement;
           }
         }
       }
-      return bestHtml;
+
+      const textLines = (bestEl?.innerText || document.body.innerText || "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const titleFromDocument = document.title.match(/^[^"]+"(.+)"\s*\/\s*X$/)?.[1];
+      const titleFromLines = textLines.find(
+        (line, index) =>
+          index > 0 &&
+          !line.startsWith("@") &&
+          !/^\d+(\.\d+)?[KMB]?$/.test(line) &&
+          line !== "Article" &&
+          line !== "Conversation" &&
+          line !== "See new posts"
+      );
+      const title = (titleFromDocument || titleFromLines || prop("og:title") || "X Article")
+        .replace(/\s+\/\s+X$/, "")
+        .trim();
+
+      const author = textLines.find((line, index) => index < 6 && !line.startsWith("@"));
+      const handle = textLines.find((line) => /^@\w{1,15}$/.test(line));
+      const published =
+        bestEl?.querySelector("time")?.getAttribute("datetime") ||
+        document.querySelector("time")?.getAttribute("datetime") ||
+        name("article:published_time") ||
+        undefined;
+      const imgs = Array.from(bestEl?.querySelectorAll("img") || []);
+      const coverImg =
+        imgs.find((img) => {
+          const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
+          const href = img.closest("a")?.getAttribute("href") || "";
+          return href.includes("/media/") || /pbs\.twimg\.com\/media\//.test(src);
+        }) ||
+        imgs.find((img) => {
+          const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
+          return src !== "" && !src.includes("profile_images");
+        });
+      const cover =
+        coverImg?.getAttribute("src") || coverImg?.getAttribute("data-src") || prop("og:image");
+
+      return {
+        meta: { title, cover, author, handle, published },
+        html: bestEl?.innerHTML || "",
+      };
     });
 
     if (!html || html.length < 40) {

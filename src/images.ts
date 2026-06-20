@@ -1,11 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ImageRef } from "./toMarkdown.js";
+import type { ImageRef, MediaRef } from "./toMarkdown.js";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 export type ImageFormat = "original" | "png";
+
+interface DownloadResult {
+  map: Map<string, string>;
+  saved: number;
+}
 
 function extFromUrl(url: string, contentType: string | null): string {
   try {
@@ -22,6 +27,37 @@ function extFromUrl(url: string, contentType: string | null): string {
   if (contentType?.includes("webp")) return "webp";
   if (contentType?.includes("gif")) return "gif";
   return "jpg";
+}
+
+function extFromMediaUrl(url: string, contentType: string | null): string {
+  try {
+    const u = new URL(url);
+    const fmt = u.searchParams.get("format");
+    if (fmt) return fmt.toLowerCase().replace("quicktime", "mov");
+    const m = u.pathname.match(/\.(mp4|webm|mov|m4v|gif|m3u8)$/i);
+    if (m) return m[1].toLowerCase();
+  } catch {
+    /* ignore */
+  }
+  const type = contentType?.toLowerCase() || "";
+  if (type.includes("webm")) return "webm";
+  if (type.includes("quicktime")) return "mov";
+  if (type.includes("gif")) return "gif";
+  if (type.includes("mpegurl") || type.includes("m3u8")) return "m3u8";
+  return "mp4";
+}
+
+async function fetchBuffer(url: string): Promise<{ buf: Buffer; contentType: string | null }> {
+  const u = new URL(url);
+  if (!["http:", "https:"].includes(u.protocol)) {
+    throw new Error(`Unsupported URL protocol: ${u.protocol}`);
+  }
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, Referer: "https://x.com/" },
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return { buf: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get("content-type") };
 }
 
 async function maybePng(buf: Buffer, ext: string, format: ImageFormat): Promise<{ buf: Buffer; ext: string }> {
@@ -46,7 +82,7 @@ export async function downloadImages(
   destDir: string,
   relPrefix: string,
   format: ImageFormat
-): Promise<{ map: Map<string, string>; saved: number }> {
+): Promise<DownloadResult> {
   const map = new Map<string, string>();
   if (images.length === 0) return { map, saved: 0 };
   await fs.mkdir(destDir, { recursive: true });
@@ -56,10 +92,8 @@ export async function downloadImages(
   for (const img of images) {
     i++;
     try {
-      const res = await fetch(img.src, { headers: { "User-Agent": UA, Referer: "https://x.com/" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      let buf: Buffer = Buffer.from(await res.arrayBuffer());
-      let ext = extFromUrl(img.src, res.headers.get("content-type"));
+      let { buf, contentType } = await fetchBuffer(img.src);
+      let ext = extFromUrl(img.src, contentType);
       ({ buf, ext } = await maybePng(buf, ext, format));
       const name = `${String(i).padStart(2, "0")}.${ext}`;
       await fs.writeFile(path.join(destDir, name), buf);
@@ -68,6 +102,39 @@ export async function downloadImages(
     } catch (e) {
       console.error(`[xarticle-mcp] image ${i} failed (${img.src}): ${(e as Error).message}`);
       map.set(img.placeholder, img.src); // fall back to remote URL
+    }
+  }
+  return { map, saved };
+}
+
+/**
+ * Download each referenced video/GIF-style media asset into `destDir`. The
+ * Markdown uses HTML video tags, so placeholders map to paths like
+ * "media/01.mp4". If a media URL cannot be downloaded, keep the original URL.
+ */
+export async function downloadMedia(
+  media: MediaRef[],
+  destDir: string,
+  relPrefix: string
+): Promise<DownloadResult> {
+  const map = new Map<string, string>();
+  if (media.length === 0) return { map, saved: 0 };
+  await fs.mkdir(destDir, { recursive: true });
+
+  let saved = 0;
+  let i = 0;
+  for (const item of media) {
+    i++;
+    try {
+      const { buf, contentType } = await fetchBuffer(item.src);
+      const ext = extFromMediaUrl(item.src, contentType);
+      const name = `${String(i).padStart(2, "0")}.${ext}`;
+      await fs.writeFile(path.join(destDir, name), buf);
+      map.set(item.placeholder, `${relPrefix}/${name}`);
+      saved++;
+    } catch (e) {
+      console.error(`[xarticle-mcp] media ${i} failed (${item.src}): ${(e as Error).message}`);
+      map.set(item.placeholder, item.src);
     }
   }
   return { map, saved };

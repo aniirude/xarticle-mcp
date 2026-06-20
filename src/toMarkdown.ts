@@ -6,9 +6,15 @@ export interface ImageRef {
   placeholder: string;
 }
 
+export interface MediaRef {
+  src: string;
+  placeholder: string;
+}
+
 export interface MarkdownResult {
   markdown: string;
   images: ImageRef[];
+  media: MediaRef[];
 }
 
 function absolutize(src: string, base: string): string {
@@ -17,6 +23,13 @@ function absolutize(src: string, base: string): string {
   } catch {
     return src;
   }
+}
+
+function unwrapLinkedImages(markdown: string): string {
+  return markdown.replace(
+    /\[\s*\n+\s*(!\[[^\]]*]\([^)]+\))\s*\n+\s*]\([^)]+\)/g,
+    "\n\n$1\n\n"
+  );
 }
 
 /**
@@ -34,6 +47,7 @@ export function htmlToMarkdown(html: string, baseUrl: string): MarkdownResult {
   td.use(gfm);
 
   const images: ImageRef[] = [];
+  const media: MediaRef[] = [];
 
   td.addRule("xImages", {
     filter: "img",
@@ -53,15 +67,51 @@ export function htmlToMarkdown(html: string, baseUrl: string): MarkdownResult {
     },
   });
 
+  td.addRule("xVideos", {
+    filter: "video",
+    replacement: (_content, node) => {
+      const el = node as unknown as HTMLVideoElement;
+      const source = el.querySelector("source") as HTMLSourceElement | null;
+      const raw =
+        el.getAttribute("src") ||
+        el.getAttribute("data-src") ||
+        source?.getAttribute("src") ||
+        source?.getAttribute("data-src") ||
+        "";
+      const poster = el.getAttribute("poster") || "";
+
+      // X often renders blob-backed videos. Those cannot be downloaded after the
+      // page closes, so preserve the poster image if one exists.
+      if (!raw || raw.startsWith("blob:") || raw.startsWith("data:")) {
+        if (poster && !poster.startsWith("blob:") && !poster.startsWith("data:")) {
+          const src = absolutize(poster, baseUrl);
+          const placeholder = `__XIMG_${images.length}__`;
+          images.push({ src, placeholder });
+          return `\n\n![Video poster](${placeholder})\n\n`;
+        }
+        return "\n\n_[Video unavailable in archive]_\n\n";
+      }
+
+      const src = absolutize(raw, baseUrl);
+      const placeholder = `__XMEDIA_${media.length}__`;
+      media.push({ src, placeholder });
+      return `\n\n<video controls src="${placeholder}"></video>\n\n[Open video](${placeholder})\n\n`;
+    },
+  });
+
   // Drop interactive/SVG cruft that X sprinkles through the DOM.
   td.remove((node) =>
     ["SCRIPT", "STYLE", "NOSCRIPT", "SVG", "BUTTON"].includes(node.nodeName)
   );
 
-  const markdown = td
+  const rawMarkdown = td
     .turndown(html)
+    .replace(/\[\s*(!\[[^\]]*]\([^)]+\))\s*]\([^)]+\)/g, "$1");
+
+  const markdown = unwrapLinkedImages(rawMarkdown)
+    .replace(/^#{1,6}\s*$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  return { markdown, images };
+  return { markdown, images, media };
 }

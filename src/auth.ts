@@ -3,16 +3,50 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { chromium, type BrowserContext } from "playwright";
-import { CONFIG_DIR, STATE_PATH } from "./paths.js";
+import { CONFIG_DIR, KEY_PATH, STATE_PATH } from "./paths.js";
 import { encrypt, decrypt } from "./crypto.js";
 
 export function hasSession(): boolean {
   return fs.existsSync(STATE_PATH);
 }
 
+export function sessionStatus(): { ok: boolean; message: string } {
+  if (!fs.existsSync(STATE_PATH)) {
+    return {
+      ok: false,
+      message:
+        "No saved X session found.\n" +
+        `  config: ${CONFIG_DIR}\n` +
+        "Run one of:\n" +
+        "  node dist/server.js login\n" +
+        "  node dist/server.js login --cookies",
+    };
+  }
+  try {
+    const state = loadStorageState();
+    const cookies = Array.isArray(state.cookies) ? state.cookies.length : 0;
+    return {
+      ok: true,
+      message:
+        "Saved X session found and decrypted successfully.\n" +
+        `  session: ${STATE_PATH}\n` +
+        `  key: ${KEY_PATH}\n` +
+        `  cookies: ${cookies}`,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        "Saved X session exists, but could not be decrypted.\n" +
+        `  session: ${STATE_PATH}\n` +
+        `  error: ${(e as Error).message}`,
+    };
+  }
+}
+
 export function loadStorageState(): Record<string, unknown> {
   if (!fs.existsSync(STATE_PATH)) {
-    throw new Error("No X session saved. Run once in a terminal:  npx -y xarticle-mcp login");
+    throw new Error("No X session saved. Run once in a terminal:  xarticle-mcp login");
   }
   return JSON.parse(decrypt(fs.readFileSync(STATE_PATH)));
 }
@@ -71,7 +105,7 @@ async function isLoggedIn(page: import("playwright").Page): Promise<boolean> {
 export async function login(): Promise<void> {
   const udd = chromeUserDataDir();
   if (!udd) {
-    console.error("Chrome profile not found. Use the cookie method instead:\n  npx -y xarticle-mcp login --cookies");
+    console.error("Chrome profile not found. Use the cookie method instead:\n  the cookie method (re-run the same command, but `login --cookies`)");
     return;
   }
   console.error(
@@ -94,7 +128,7 @@ export async function login(): Promise<void> {
   } catch (e) {
     console.error(
       `\nCouldn't open your Chrome profile (it's usually still running).\n  ${(e as Error).message}\n` +
-        "Fully quit Chrome and retry, or use:  npx -y xarticle-mcp login --cookies"
+        "Fully quit Chrome and retry, or use:  the cookie method (re-run the same command, but `login --cookies`)"
     );
     return;
   }
@@ -106,7 +140,7 @@ export async function login(): Promise<void> {
     if (!(await isLoggedIn(page))) {
       console.error(
         "\nThis Chrome profile isn't logged into X. Log into x.com in Chrome first, then re-run login.\n" +
-          "(If you use a non-Default Chrome profile, use:  npx -y xarticle-mcp login --cookies)"
+          "(If you use a non-Default Chrome profile, use:  the cookie method (re-run the same command, but `login --cookies`))"
       );
       return;
     }

@@ -2,7 +2,7 @@
 
 An MCP server that saves an **X (Twitter) Article** to your disk as **Obsidian-faithful Markdown** with all images downloaded locally — so the article reads in Obsidian the way it reads on X.
 
-One tool: **`xarticle <url>`** → creates `<slug>/<slug>.md` + `images/` in your working directory, with YAML frontmatter and rewritten local image links.
+One tool: **`xarticle <url>`** -> creates `<slug>/<slug>.md` + `images/` + `media/` in your working directory, with YAML frontmatter and rewritten local asset links.
 
 > Works in any MCP client (Claude Code, Codex, Cursor, Windsurf, …). Fetches via an authenticated headless browser using **your own** X session, stored encrypted on your machine.
 
@@ -41,6 +41,24 @@ npx -y xarticle-mcp login
 
 Your session is encrypted (AES-256-GCM) at `~/.xarticle/storageState.enc` with a key in `~/.xarticle/key`. It never leaves your machine and is never committed.
 
+### Local development commands
+
+Before this package is published to npm, run the local built server directly from this project folder:
+
+```bash
+node dist/server.js login
+node dist/server.js status
+```
+
+If Chrome profile capture fails because Chrome is still locked or you use a non-default browser/profile, use the cookie method:
+
+```bash
+node dist/server.js login --cookies
+node dist/server.js status
+```
+
+The cookie method asks for the `auth_token` and `ct0` values from a browser where you are already logged into X. It saves them into the same encrypted Playwright session file.
+
 ## Use
 
 In your MCP client, just ask:
@@ -55,6 +73,7 @@ It writes, in your current working directory:
 <article-slug>/
   <article-slug>.md     # frontmatter + body, local image links
   images/               # 01.jpg, 02.jpg, ... (+ cover)
+  media/                # 01.mp4, 02.webm, ... when article videos/GIF-video are downloadable
 ```
 
 ### Tool input
@@ -70,6 +89,7 @@ It writes, in your current working directory:
 - **Your account / X ToS:** this automates access with your logged-in session. Keep it personal and low-volume; automated access carries some account risk.
 - **Only what you can see:** articles your account can't view won't fetch.
 - **X markup changes:** extraction selectors live in `src/fetchArticle.ts`; if X changes its DOM, that's the file to update.
+- **Videos/GIFs:** direct video URLs are saved under `media/` and embedded with `<video controls>`. For blob-backed X videos, the tool tries to capture the underlying `video.twimg.com` response while the page loads; if that is not available, it keeps a poster image or fallback note instead of failing the whole article.
 
 ## Develop
 

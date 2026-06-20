@@ -8,7 +8,7 @@
   },
   "files": [
     "dist",
-    "scripts",
+    "scripts/postinstall.mjs",
     "README.md",
     "LICENSE"
   ],
@@ -22,6 +22,8 @@
     "postinstall": "node scripts/postinstall.mjs",
     "start": "node dist/server.js",
     "login": "node dist/server.js login",
+    "login:cookies": "node dist/server.js login --cookies",
+    "status": "node dist/server.js status",
     "smoke": "node test/smoke.mjs"
   },
   "keywords": [

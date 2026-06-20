@@ -3,7 +3,7 @@ import path from "node:path";
 import { normalizeUrl } from "./url.js";
 import { fetchArticle } from "./fetchArticle.js";
 import { htmlToMarkdown, type ImageRef } from "./toMarkdown.js";
-import { downloadImages, type ImageFormat } from "./images.js";
+import { downloadImages, downloadMedia, type ImageFormat } from "./images.js";
 
 export interface SaveOptions {
   url: string;
@@ -16,6 +16,7 @@ export interface SaveResult {
   dir: string;
   mdPath: string;
   imageCount: number;
+  mediaCount: number;
 }
 
 function slugify(title: string): string {
@@ -52,13 +53,49 @@ function yaml(obj: Record<string, string | undefined>): string {
   return lines.join("\n");
 }
 
+function trimArticleChrome(markdown: string, title: string): string {
+  const lines = markdown.split("\n");
+  const titleIndex = lines.findIndex((line) => line.trim() === title.trim());
+  if (titleIndex === -1) return markdown;
+
+  let start = titleIndex + 1;
+  while (start < lines.length) {
+    const line = lines[start].trim();
+    if (
+      line === "" ||
+      line === "[" ||
+      line === "]" ||
+      /^\]\(.+\)$/.test(line) ||
+      /^\d+(\.\d+)?[KMB]?$/.test(line)
+    ) {
+      start++;
+      continue;
+    }
+    break;
+  }
+
+  return lines.slice(start).join("\n").trim();
+}
+
+function trimTweetFooter(markdown: string): string {
+  const lines = markdown.split("\n");
+  const footerIndex = lines.findIndex((line) =>
+    /^\[\d{1,2}:\d{2}\s+[AP]M\s+.+\]\(\/[^)]+\/status\/\d+\)$/.test(line.trim())
+  );
+  if (footerIndex === -1) return markdown;
+  return lines.slice(0, footerIndex).join("\n").trim();
+}
+
 export async function saveArticle(opts: SaveOptions): Promise<SaveResult> {
   const sourceUrl = normalizeUrl(opts.url);
   const outputDir = opts.outputDir || process.cwd();
   const format: ImageFormat = opts.imageFormat || "original";
 
   const { meta, html } = await fetchArticle(sourceUrl);
-  const { markdown, images } = htmlToMarkdown(html, sourceUrl);
+  const { markdown, images, media } = htmlToMarkdown(html, sourceUrl);
+  let body = trimTweetFooter(trimArticleChrome(markdown, meta.title));
+  const bodyImages = images.filter((img) => body.includes(img.placeholder));
+  const bodyMedia = media.filter((item) => body.includes(item.placeholder));
 
   const slug = slugify(meta.title);
   const dir = await uniqueDir(outputDir, slug);
@@ -67,7 +104,7 @@ export async function saveArticle(opts: SaveOptions): Promise<SaveResult> {
   const coverRef: ImageRef | null = meta.cover
     ? { src: meta.cover, placeholder: "__XIMG_COVER__" }
     : null;
-  const allImages = coverRef ? [coverRef, ...images] : images;
+  const allImages = coverRef ? [coverRef, ...bodyImages] : bodyImages;
 
   const { map, saved } = await downloadImages(
     allImages,
@@ -75,9 +112,14 @@ export async function saveArticle(opts: SaveOptions): Promise<SaveResult> {
     "images",
     format
   );
+  const { map: mediaMap, saved: mediaSaved } = await downloadMedia(
+    bodyMedia,
+    path.join(dir, "media"),
+    "media"
+  );
 
-  let body = markdown;
   for (const [ph, rel] of map) body = body.split(ph).join(rel);
+  for (const [ph, rel] of mediaMap) body = body.split(ph).join(rel);
 
   const frontmatter = yaml({
     title: meta.title,
@@ -95,5 +137,5 @@ export async function saveArticle(opts: SaveOptions): Promise<SaveResult> {
   const mdPath = path.join(dir, `${slug}.md`);
   await fs.writeFile(mdPath, md, "utf8");
 
-  return { title: meta.title, dir, mdPath, imageCount: saved };
+  return { title: meta.title, dir, mdPath, imageCount: saved, mediaCount: mediaSaved };
 }

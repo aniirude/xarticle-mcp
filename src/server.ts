@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { saveArticle } from "./saveArticle.js";
-import { login, loginWithCookiesPrompt, hasSession } from "./auth.js";
+import { login, loginWithCookiesPrompt, hasSession, sessionStatus } from "./auth.js";
 
 const VERSION = "0.1.0";
 
@@ -15,7 +15,7 @@ async function runServer(): Promise<void> {
     {
       title: "Save X Article to Markdown",
       description:
-        "Fetch an X (Twitter) Article and save it as an Obsidian-faithful Markdown file with images downloaded locally. Creates <slug>/<slug>.md + images/ in the working directory (or outputDir). Requires a one-time `xarticle-mcp login`.",
+        "Fetch an X (Twitter) Article and save it as an Obsidian-faithful Markdown file with images and media downloaded locally. Creates <slug>/<slug>.md + images/ + media/ in the working directory (or outputDir). Requires a one-time `xarticle-mcp login`.",
       inputSchema: {
         url: z.string().describe("The X Article URL (x.com/...)"),
         outputDir: z
@@ -35,7 +35,11 @@ async function runServer(): Promise<void> {
             content: [
               {
                 type: "text",
-                text: "No X session found. Run this once in a terminal first:\n  npx -y xarticle-mcp login",
+                text:
+                  "No X session found. Run this once in a terminal first:\n" +
+                  "  xarticle-mcp login\n\n" +
+                  "If you are running from the local project before npm publish:\n" +
+                  "  node dist/server.js login",
               },
             ],
             isError: true,
@@ -46,7 +50,12 @@ async function runServer(): Promise<void> {
           content: [
             {
               type: "text",
-              text: `Saved "${r.title}" → ${r.dir}\n  markdown: ${r.mdPath}\n  images: ${r.imageCount}`,
+              text: [
+                `Saved "${r.title}" -> ${r.dir}`,
+                `  markdown: ${r.mdPath}`,
+                `  images: ${r.imageCount}`,
+                `  media: ${r.mediaCount}`,
+              ].join("\n"),
             },
           ],
         };
@@ -65,6 +74,11 @@ async function runServer(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (process.argv[2] === "status") {
+    const status = sessionStatus();
+    console.error(status.message);
+    process.exit(status.ok ? 0 : 1);
+  }
   if (process.argv[2] === "login") {
     if (process.argv[3] === "--cookies") {
       await loginWithCookiesPrompt();

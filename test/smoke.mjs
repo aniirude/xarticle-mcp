@@ -8,12 +8,16 @@ import { htmlToMarkdown } from "../dist/toMarkdown.js";
 {
   const html =
     '<h1>Hello</h1><p>Yo <strong>bold</strong> and <em>italic</em></p>' +
-    '<img src="https://pbs.twimg.com/media/abc?format=jpg&name=large" alt="pic">';
-  const { markdown, images } = htmlToMarkdown(html, "https://x.com/i/article/1");
+    '<img src="https://pbs.twimg.com/media/abc?format=jpg&name=large" alt="pic">' +
+    '<video><source src="https://video.twimg.com/ext_tw_video/123/pu/vid/720x720/demo.mp4"></video>';
+  const { markdown, images, media } = htmlToMarkdown(html, "https://x.com/i/article/1");
   assert(markdown.includes("# Hello"), "heading converted");
   assert(markdown.includes("**bold**"), "bold converted");
   assert(images.length === 1, "one image collected");
   assert(markdown.includes(images[0].placeholder), "placeholder present in markdown");
+  assert(media.length === 1, "one media item collected");
+  assert(markdown.includes("<video controls"), "video embed emitted");
+  assert(markdown.includes(media[0].placeholder), "media placeholder present in markdown");
   console.log("markdown conversion: OK");
 }
 
