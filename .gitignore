@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+
+# Secrets / session — never commit
+*.enc
+storageState*
+.xarticle/
+.env
+*.key

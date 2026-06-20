@@ -1,0 +1,58 @@
+{
+  "name": "xarticle-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that saves X (Twitter) Articles as Obsidian-faithful Markdown with locally-downloaded images. One tool: xarticle <url>.",
+  "type": "module",
+  "bin": {
+    "xarticle-mcp": "dist/server.js"
+  },
+  "files": [
+    "dist",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build",
+    "postinstall": "node scripts/postinstall.mjs",
+    "start": "node dist/server.js",
+    "login": "node dist/server.js login",
+    "smoke": "node test/smoke.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "x",
+    "twitter",
+    "obsidian",
+    "markdown",
+    "claude",
+    "codex"
+  ],
+  "author": "aniirude",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aniirude/xarticle-mcp.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "playwright": "^1.49.0",
+    "turndown": "^7.2.0",
+    "turndown-plugin-gfm": "^1.0.2",
+    "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/turndown": "^5.0.5",
+    "typescript": "^5.7.0"
+  }
+}

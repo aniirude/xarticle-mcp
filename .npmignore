@@ -1,0 +1,9 @@
+src/
+test/
+tsconfig.json
+*.enc
+storageState*
+.xarticle/
+.env
+*.key
+.github/
