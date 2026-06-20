@@ -9,5 +9,6 @@ storageState*
 .xarticle/
 .env
 *.key
+.npmrc*
 
 *.tgz
