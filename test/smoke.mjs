@@ -16,8 +16,7 @@ import { htmlToMarkdown } from "../dist/toMarkdown.js";
   assert(images.length === 1, "one image collected");
   assert(markdown.includes(images[0].placeholder), "placeholder present in markdown");
   assert(media.length === 1, "one media item collected");
-  assert(markdown.includes("<video controls"), "video embed emitted");
-  assert(markdown.includes(media[0].placeholder), "media placeholder present in markdown");
+  assert(markdown.includes(media[0].placeholder), "media placeholder present in markdown (becomes ![[...]] after download)");
   console.log("markdown conversion: OK");
 }
 
