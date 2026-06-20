@@ -1,93 +1,159 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import readline from "node:readline";
 import { chromium, type BrowserContext } from "playwright";
-import { CONFIG_DIR, PROFILE_DIR } from "./paths.js";
-
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
-// Flags that suppress the "automated test software" infobar and the navigator.webdriver signal.
-const STEALTH_ARGS = [
-  "--disable-blink-features=AutomationControlled",
-  "--no-default-browser-check",
-];
+import { CONFIG_DIR, STATE_PATH } from "./paths.js";
+import { encrypt, decrypt } from "./crypto.js";
 
 export function hasSession(): boolean {
-  try {
-    return fs.existsSync(PROFILE_DIR) && fs.readdirSync(PROFILE_DIR).length > 0;
-  } catch {
-    return false;
-  }
+  return fs.existsSync(STATE_PATH);
 }
 
-/**
- * Launch a persistent browser context backed by ~/.xarticle/chrome-profile.
- * Prefers the real installed Chrome (channel: "chrome") — far less likely to be
- * flagged by X/Google than Playwright's bundled Chromium — and falls back to
- * bundled Chromium if Chrome isn't installed.
- */
-export async function openContext(
-  headless: boolean,
-  viewport: { width: number; height: number } | null = null
+export function loadStorageState(): Record<string, unknown> {
+  if (!fs.existsSync(STATE_PATH)) {
+    throw new Error("No X session saved. Run once in a terminal:  npx -y xarticle-mcp login");
+  }
+  return JSON.parse(decrypt(fs.readFileSync(STATE_PATH)));
+}
+
+function saveStorageState(state: unknown): void {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(STATE_PATH, encrypt(JSON.stringify(state)), { mode: 0o600 });
+}
+
+/** A headless context that REUSES the saved session (no login) to read the article. */
+export async function openFetchContext(
+  viewport: { width: number; height: number } = { width: 1280, height: 900 }
 ): Promise<BrowserContext> {
-  fs.mkdirSync(PROFILE_DIR, { recursive: true });
-  const opts = {
-    headless,
-    viewport,
-    userAgent: UA,
-    locale: "en-US",
-    args: STEALTH_ARGS,
-  } as const;
-  let ctx: BrowserContext;
+  const storageState = loadStorageState() as never;
+  let browser;
   try {
-    ctx = await chromium.launchPersistentContext(PROFILE_DIR, { ...opts, channel: "chrome" });
+    browser = await chromium.launch({ headless: true, channel: "chrome" });
   } catch {
-    ctx = await chromium.launchPersistentContext(PROFILE_DIR, opts);
+    browser = await chromium.launch({ headless: true });
   }
-  await ctx.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-  });
-  return ctx;
+  return browser.newContext({ storageState, viewport, locale: "en-US" });
 }
 
-function waitForEnter(prompt: string): Promise<void> {
-  process.stderr.write(prompt);
-  return new Promise((resolve) => {
-    const onData = () => {
-      process.stdin.pause();
-      process.stdin.off("data", onData);
-      resolve();
-    };
-    process.stdin.resume();
-    process.stdin.on("data", onData);
-  });
+// ---------- login: reuse the user's real browser session (no automated login) ----------
+
+function chromeUserDataDir(): string | null {
+  const home = os.homedir();
+  let dir: string;
+  if (process.platform === "win32") {
+    dir = path.join(process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "Google", "Chrome", "User Data");
+  } else if (process.platform === "darwin") {
+    dir = path.join(home, "Library", "Application Support", "Google", "Chrome");
+  } else {
+    dir = path.join(home, ".config", "google-chrome");
+  }
+  return fs.existsSync(dir) ? dir : null;
+}
+
+function ask(question: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  return new Promise((resolve) => rl.question(question, (a) => { rl.close(); resolve(a.trim()); }));
+}
+
+async function isLoggedIn(page: import("playwright").Page): Promise<boolean> {
+  if (/\/(login|i\/flow\/login)/.test(page.url())) return false;
+  const el = page
+    .locator('[data-testid="AppTabBar_Home_Link"], [aria-label="Home timeline"], [data-testid="SideNav_AccountSwitcher_Button"]')
+    .first();
+  return (await el.count().catch(() => 0)) > 0;
 }
 
 /**
- * One-time interactive login. Opens real Chrome to x.com; the user signs in
- * (use username + password — Google/Apple SSO is blocked inside controlled
- * browsers). The session persists in the profile dir for headless fetches.
- * Run this from a terminal, not via the MCP client.
+ * Default login: open the user's REAL Chrome profile (already logged into X),
+ * capture the session, save it encrypted. No login happens, so X never rate-limits.
  */
 export async function login(): Promise<void> {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  const udd = chromeUserDataDir();
+  if (!udd) {
+    console.error("Chrome profile not found. Use the cookie method instead:\n  npx -y xarticle-mcp login --cookies");
+    return;
+  }
   console.error(
     [
-      "Opening Chrome to x.com.",
-      "Tip: sign in with your USERNAME + PASSWORD, not 'Continue with Google/Apple'",
-      "(SSO popups are blocked inside automated browsers).",
-      "If X says 'login temporarily limited', wait ~15-30 min and run login again.",
+      "Reusing your existing X login (no new sign-in, so X won't rate-limit).",
+      "1) Make sure you're logged into X in Chrome.",
+      "2) Fully QUIT Chrome (close all windows; check the system tray).",
       "",
     ].join("\n")
   );
-  const ctx = await openContext(false);
+  await ask("Press ENTER once Chrome is fully closed...");
+
+  let ctx: BrowserContext;
+  try {
+    ctx = await chromium.launchPersistentContext(udd, {
+      channel: "chrome",
+      headless: false,
+      args: ["--profile-directory=Default"],
+    });
+  } catch (e) {
+    console.error(
+      `\nCouldn't open your Chrome profile (it's usually still running).\n  ${(e as Error).message}\n` +
+        "Fully quit Chrome and retry, or use:  npx -y xarticle-mcp login --cookies"
+    );
+    return;
+  }
+
   try {
     const page = ctx.pages()[0] ?? (await ctx.newPage());
-    await page.goto("https://x.com/login", { waitUntil: "domcontentloaded" });
-    await waitForEnter(
-      "When you can see your home timeline (logged in), press ENTER here to save the session...\n"
-    );
-    console.error(`\nSession saved to profile: ${PROFILE_DIR}`);
+    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" }).catch(() => {});
+    await page.waitForTimeout(2500);
+    if (!(await isLoggedIn(page))) {
+      console.error(
+        "\nThis Chrome profile isn't logged into X. Log into x.com in Chrome first, then re-run login.\n" +
+          "(If you use a non-Default Chrome profile, use:  npx -y xarticle-mcp login --cookies)"
+      );
+      return;
+    }
+    saveStorageState(await ctx.storageState());
+    console.error("\nSaved your X session (encrypted). You can reopen Chrome now.");
   } finally {
     await ctx.close();
   }
+}
+
+function makeCookie(name: string, value: string, httpOnly: boolean) {
+  return {
+    name,
+    value,
+    domain: ".x.com",
+    path: "/",
+    expires: Math.floor(Date.now() / 1000) + 365 * 24 * 3600,
+    httpOnly,
+    secure: true,
+    sameSite: "None" as const,
+  };
+}
+
+/**
+ * Fallback login: paste the two X session cookies. Works on any OS/browser and
+ * never triggers a login. Get them from a logged-in x.com tab:
+ * F12 -> Application -> Cookies -> x.com -> copy `auth_token` and `ct0`.
+ */
+export async function loginWithCookiesPrompt(): Promise<void> {
+  console.error(
+    [
+      "Cookie login. In a browser logged into X:",
+      "  F12 -> Application -> Cookies -> https://x.com",
+      "  copy the VALUES of `auth_token` and `ct0`.",
+      "",
+    ].join("\n")
+  );
+  const authToken = await ask("auth_token: ");
+  const ct0 = await ask("ct0: ");
+  if (!authToken || !ct0) {
+    console.error("Both auth_token and ct0 are required.");
+    return;
+  }
+  const state = {
+    cookies: [makeCookie("auth_token", authToken, true), makeCookie("ct0", ct0, false)],
+    origins: [] as unknown[],
+  };
+  saveStorageState(state);
+  console.error("Saved your X session (encrypted).");
 }

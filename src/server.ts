@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { saveArticle } from "./saveArticle.js";
-import { login, hasSession } from "./auth.js";
+import { login, loginWithCookiesPrompt, hasSession } from "./auth.js";
 
 const VERSION = "0.1.0";
 
@@ -66,7 +66,11 @@ async function runServer(): Promise<void> {
 
 async function main(): Promise<void> {
   if (process.argv[2] === "login") {
-    await login();
+    if (process.argv[3] === "--cookies") {
+      await loginWithCookiesPrompt();
+    } else {
+      await login();
+    }
     process.exit(0);
   }
   await runServer();

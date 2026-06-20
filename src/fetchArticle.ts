@@ -1,4 +1,4 @@
-import { openContext } from "./auth.js";
+import { openFetchContext } from "./auth.js";
 
 export interface ArticleMeta {
   title: string;
@@ -20,9 +20,9 @@ export interface FetchResult {
  * changes its markup, this is the only file to adjust.
  */
 export async function fetchArticle(sourceUrl: string): Promise<FetchResult> {
-  const context = await openContext(true, { width: 1280, height: 2200 });
+  const context = await openFetchContext({ width: 1280, height: 900 });
   try {
-    const page = context.pages()[0] ?? (await context.newPage());
+    const page = await context.newPage();
     await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
 
@@ -104,6 +104,6 @@ export async function fetchArticle(sourceUrl: string): Promise<FetchResult> {
 
     return { meta, html, sourceUrl };
   } finally {
-    await context.close();
+    await context.browser()?.close();
   }
 }
